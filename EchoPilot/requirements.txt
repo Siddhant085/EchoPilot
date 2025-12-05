@@ -3,6 +3,7 @@ langchain
 langgraph
 langchain-ollama
 langchain-groq
+langchain-xai
 python-dotenv
 
 # MCP for Tool Communication
