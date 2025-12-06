@@ -11,11 +11,13 @@ class Speaker:
             voices = self.engine.getProperty('voices')
             # voices[1] is often a female voice on many systems.
             # You can experiment by changing the index.
-            self.engine.setProperty('voice', voices[1].id)
+            if len(voices) > 1:
+                self.engine.setProperty('voice', voices[1].id)
             self.engine.setProperty('rate', 150)
             print("🔊 Offline TTS Speaker (pyttsx3) initialized.")
         except Exception as e:
-            logging.error(f"Failed to initialize pyttsx3 engine: {e}")
+            # Only log as warning, not error, since TTS is optional
+            logging.warning(f"TTS engine not available (eSpeak not installed): {e}")
             self.engine = None
 
     def say(self, text):

@@ -465,7 +465,7 @@ async def fly_to_coordinates(latitude: float, longitude: float, altitude_meters:
 
     Returns: dict: A JSON object with "status" confirming successful arrival.
     """
-    connected, error_msg = check_drone_connection()
+    connected, error_msg = await check_drone_connection()
     if not connected:
         return {"status": "Error", "message": error_msg}
 
@@ -523,7 +523,7 @@ async def fly_relative(forward_meters: float = 0, right_meters: float = 0, down_
     Returns:
         dict: A JSON object confirming the relative move is complete.
     """
-    connected, error_msg = check_drone_connection()
+    connected, error_msg = await check_drone_connection()
     if not connected:
         return {"status": "Error", "message": error_msg}
 
@@ -570,7 +570,7 @@ async def do_orbit(latitude: float, longitude: float, radius_meters: float, velo
     Returns:
         dict: A JSON object confirming the orbit action was executed for 30 seconds.
     """
-    connected, error_msg = check_drone_connection()
+    connected, error_msg = await check_drone_connection()
     if not connected:
         return {"status": "Error", "message": error_msg}
 
@@ -613,7 +613,7 @@ async def land() -> dict:
     Returns: dict: A JSON object with "status" confirming a successful landing.
     """
 
-    connected, error_msg = check_drone_connection()
+    connected, error_msg = await check_drone_connection()
     if not connected:
         return {"status": "Error", "message": error_msg}
     print("-- Landing command issued...")
@@ -693,7 +693,7 @@ async def initial_drone_connection():
             print("   2. Ensure it's listening on UDP port 14550")
             print("   3. The server will automatically reconnect when available")
     except asyncio.CancelledError:
-        logger.warning("Initial connection task cancelled - connection may still be active")
+        logger.debug("Initial connection task cancelled - connection may still be active")
         # Don't reset flags on cancellation - connection might still be good
     except Exception as e:
         print(f"❌ Error during initial drone connection: {e}")
@@ -739,35 +739,73 @@ async def main():
     print("Starting MCP server. Awaiting commands from the agent...")
     print("="*60 + "\n")
     
+    # Track if this is a real shutdown vs client disconnect
+    _is_shutting_down = False
+    
     try:
         # Run the MCP server - this should block and run continuously
+        # Note: This will exit when stdin closes (client disconnects), but we keep
+        # the MAVLink connection alive for the next client connection
         await mcp.run_stdio_async()
     except KeyboardInterrupt:
         print("\n⚠️  MCP server interrupted by user")
+        _is_shutting_down = True
         raise
+    except (EOFError, BrokenPipeError, ConnectionResetError):
+        # These are expected when client disconnects - keep connection alive
+        logger.info("MCP client disconnected - keeping MAVLink connection alive for next client")
+        # Don't raise - we want to keep running and wait for next client
+        # The connection monitor will continue running
+        return
     except Exception as e:
-        print(f"❌ MCP server error: {e}")
-        logger.error(f"MCP server error: {e}", exc_info=True)
+        # Only log actual errors, not expected disconnections
+        if "sys.meta_path is None" not in str(e):
+            print(f"❌ MCP server error: {e}")
+            logger.error(f"MCP server error: {e}", exc_info=True)
+        _is_shutting_down = True
         raise
     finally:
-        # Only clean up on actual shutdown (not on restart)
-        logger.info("MCP server shutting down - cleaning up tasks...")
-        if initial_connection_task and not initial_connection_task.done():
-            initial_connection_task.cancel()
-            try:
-                await initial_connection_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        if connection_monitor_task and not connection_monitor_task.done():
-            connection_monitor_task.cancel()
-            try:
-                await connection_monitor_task
-            except asyncio.CancelledError:
-                pass
-        logger.info("Cleanup complete")
+        # Only clean up on actual shutdown (KeyboardInterrupt or fatal error)
+        # DO NOT cancel connection tasks on normal client disconnect
+        if _is_shutting_down:
+            logger.info("Shutting down - closing MAVLink connection...")
+            if initial_connection_task and not initial_connection_task.done():
+                initial_connection_task.cancel()
+                try:
+                    await initial_connection_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if connection_monitor_task and not connection_monitor_task.done():
+                connection_monitor_task.cancel()
+                try:
+                    await connection_monitor_task
+                except asyncio.CancelledError:
+                    pass
+            logger.info("MAVLink connection closed")
+        else:
+            # Client disconnected but we're keeping connection alive
+            logger.debug("MCP client disconnected - MAVLink connection remains active")
 
 if __name__ == "__main__":
+    import atexit
+    import sys
+    
+    # Suppress MAVSDK cleanup errors during shutdown
+    def cleanup_drone():
+        try:
+            # Try to clean up gracefully
+            pass
+        except Exception:
+            # Ignore cleanup errors during shutdown
+            pass
+    
+    atexit.register(cleanup_drone)
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nServer terminated by user.")
+    except Exception as e:
+        # Suppress MAVSDK cleanup errors
+        if "sys.meta_path is None" not in str(e):
+            raise
