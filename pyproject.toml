@@ -1,0 +1,23 @@
+[project]
+name = "echopilot"
+version = "0.1.0"
+description = "A Python project"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.13.3",
+    "httpx>=0.28.1",
+    "langchain>=1.1.2",
+    "langchain-groq>=1.1.0",
+    "langchain-mcp-adapters>=0.1.14",
+    "langchain-ollama>=1.0.0",
+    "langchain-xai>=1.1.0",
+    "langgraph>=1.0.4",
+    "mavsdk>=3.10.2",
+    "mcp>=1.22.0",
+    "pyaudio>=0.2.14",
+    "python-dotenv>=1.2.1",
+    "pyttsx3>=2.99",
+    "speechrecognition>=3.14.4",
+]
+
